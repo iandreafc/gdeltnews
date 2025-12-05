@@ -4,7 +4,8 @@ This repository contains code for reconstructing the text of news articles using
 
 ## Code and Example Usage
 
-The code is available [here](GDELTnews_WordMatch4.py) (single-process) and [here](GDELTnews_WordMatch4_MultiProcess.py) (multi-process).
+The full multi-process pipeline lives in the [pipeline/](pipeline/) directory, and a walk-through demo is available in [pipeline/GDELT_Reconstructor.ipynb](pipeline/GDELT_Reconstructor.ipynb).
+Alternatively, GDELT data can be pre-filtered and downloaded via Google BigQuery, then processed directly with [gdelt_wordmatch_multiprocess.py](pipeline/gdelt_wordmatch_multiprocess.py) without running the full download pipeline.
 
 An example input file can be downloaded from the following URL:
 [http://data.gdeltproject.org/gdeltv3/webngrams/20250316000100.webngrams.json.gz](http://data.gdeltproject.org/gdeltv3/webngrams/20250316000100.webngrams.json.gz)

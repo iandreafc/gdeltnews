@@ -1,0 +1,15 @@
+#STEP 1 Download GDELT data in a specific time range
+python step1_gdelt_download.py --start 2025-11-25T00:00:00 --end 2025-11-25T23:59:00 --outdir gdeltdata --no-decompress
+
+#STEP 2 
+#Decompress files
+#Filter by URL and Language
+#Reconstruct articles and produce CSVs
+#Delete decompressed files
+python step2_reconstruct_gdelt.py --input-dir gdeltdata --output-dir gdeltpreprocessed --language it --url-filter "repubblica.it,corriere.it" --processes 10
+
+#STEP3
+#Filter CSV files based on search query
+#Remove duplicates
+#Merge all relevant data into a single CSV file
+python step3_filtermerge_db.py --input-dir gdeltpreprocessed --output final_filtered_dedup.csv --query "((elezioni OR voto) AND (regionali OR campania)) OR ((fico OR cirielli) AND NOT veneto)"
