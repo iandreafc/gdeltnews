@@ -1,36 +1,54 @@
-#!/usr/bin/env python3
-"""Step 3: filter and deduplicate reconstructed article CSVs.
+"""Filter and deduplicate reconstructed article CSVs.
 
-Reads article CSV files produced by the reconstruction step, filters articles
-with a Boolean query (AND / OR / NOT with parentheses), and writes a single
-CSV with deduplicated URLs (keeping the longest text per URL) and a Source label column when available.
+Reads article CSV files produced by `reconstruct.py`, filters articles with a
+Boolean query (AND / OR / NOT with parentheses), and writes a single CSV with:
+
+- deduplicated URLs (keeping the longest text per URL)
+- a `Source` label column when available
 
 Query syntax:
-- Operators: AND, OR, NOT (case-insensitive).
-- Parentheses: (...) to group.
-- Terms: single words (e.g. fico) or quoted phrases ("giorgia meloni").
-- Matching is case-insensitive and uses substring search on article text.
+- Operators: AND, OR, NOT (case-insensitive)
+- Parentheses: (...) to group
+- Terms: single words (e.g. fico) or quoted phrases ("giorgia meloni")
+Public entrypoint: :func:`filtermerge`.
+
+Matching: case-insensitive substring search over the `Text` field.
 """
 
-import argparse
+from __future__ import annotations
+
 import csv
 import os
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
-    import boolean
-except ImportError as exc:  # pragma: no cover
-    raise SystemExit(
-        "The 'boolean.py' library is required. Install it with 'pip install boolean.py'."
-    ) from exc
+    import boolean  # type: ignore
+except ImportError:  # pragma: no cover
+    boolean = None  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------
 # Boolean query parsing & evaluation using boolean.py
 # ---------------------------------------------------------------------------
 
-_algebra = boolean.BooleanAlgebra()
+_algebra = None
+
+
+def _get_algebra():
+    """Return a singleton BooleanAlgebra instance.
+
+    We import boolean.py lazily so that importing this module doesn't terminate
+    the whole program when the dependency is missing.
+    """
+    global _algebra
+    if _algebra is None:
+        if boolean is None:  # pragma: no cover
+            raise ImportError(
+                "The 'boolean.py' library is required. Install it with 'pip install boolean.py'."
+            )
+        _algebra = boolean.BooleanAlgebra()
+    return _algebra
 
 
 def _normalize_boolean_operators(query: str) -> str:
@@ -49,7 +67,7 @@ def _extract_phrases(query: str) -> Tuple[str, Dict[str, str]]:
     Example:
         '("giorgia meloni" AND fico)'
 
-    becomes something like:
+    becomes:
         '(PHRASE_0 AND fico)' with mapping {'PHRASE_0': 'giorgia meloni'}.
     """
     phrases: Dict[str, str] = {}
@@ -69,7 +87,7 @@ def build_query_expr(query: Optional[str]):
     """Build and validate the parsed Boolean expression plus phrase mapping.
 
     Returns:
-        (expr, phrases_dict) or (None, {}) if query is empty or whitespace.
+        (expr, phrases_dict) or (None, {}) if query is empty/None.
     """
     if query is None or not str(query).strip():
         return None, {}
@@ -80,24 +98,26 @@ def build_query_expr(query: Optional[str]):
     # 2) Normalize boolean operators
     q = _normalize_boolean_operators(q)
 
+    algebra = _get_algebra()
+
     try:
-        expr = _algebra.parse(q)
+        expr = algebra.parse(q)
     except Exception as exc:
         raise ValueError(f"Invalid Boolean query: {exc}") from exc
 
     return expr, phrases
 
 
-def text_matches_query(text: str, expr, phrases: Dict[str, str]) -> bool:
+def text_matches_query(text: str, expr: Any, phrases: Dict[str, str]) -> bool:
     """Evaluate expression on a given text (case-insensitive substring match)."""
     if expr is None:
         return True
 
     text_cf = text.casefold()
 
-    # All symbols in the expression
+    algebra = _get_algebra()
     symbols = expr.get_symbols()
-    subs: Dict[boolean.Symbol, boolean.Expression] = {}
+    subs: Dict[Any, Any] = {}
 
     for sym in symbols:
         name = sym.obj  # original symbol name
@@ -106,14 +126,14 @@ def text_matches_query(text: str, expr, phrases: Dict[str, str]) -> bool:
         else:
             term = str(name).casefold()
 
-        subs[sym] = _algebra.TRUE if term in text_cf else _algebra.FALSE
+        subs[sym] = algebra.TRUE if term in text_cf else algebra.FALSE
 
     try:
         value = expr.subs(subs).simplify()
     except Exception as exc:
         raise ValueError(f"Failed to evaluate query on text: {exc}") from exc
 
-    return value == _algebra.TRUE
+    return value == algebra.TRUE
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +142,7 @@ def text_matches_query(text: str, expr, phrases: Dict[str, str]) -> bool:
 
 def iter_csv_files(input_dir: str) -> List[str]:
     """List CSV files in the given directory, sorted by name."""
-    files = []
+    files: List[str] = []
     for name in os.listdir(input_dir):
         if name.lower().endswith(".csv"):
             files.append(os.path.join(input_dir, name))
@@ -139,7 +159,7 @@ def filter_csvs_to_temp(
     """Filter rows according to expr/phrases and write to a temporary CSV.
 
     Expected columns in the source CSVs:
-        Text|Date|URL|Source (Source may be empty)
+        Text|Date|URL|Source  (Source may be empty)
 
     Column order can differ, as long as 'Text' and 'URL' exist.
     """
@@ -161,7 +181,6 @@ def filter_csvs_to_temp(
 
                 col_index = {name: idx for idx, name in enumerate(header)}
                 if "Text" not in col_index or "URL" not in col_index:
-                    # Skip files not matching the expected format
                     continue
 
                 text_idx = col_index["Text"]
@@ -183,10 +202,7 @@ def filter_csvs_to_temp(
                     writer.writerow([text, date, url, source])
 
 
-def deduplicate_by_url(
-    temp_input: str,
-    final_output: str,
-) -> None:
+def deduplicate_by_url(temp_input: str, final_output: str) -> None:
     """Group rows by URL and keep only the row with the longest Text field."""
     if not os.path.exists(temp_input):
         raise ValueError(f"Temporary file not found: {temp_input}")
@@ -195,10 +211,7 @@ def deduplicate_by_url(
 
     with open(temp_input, "r", encoding="utf-8") as in_f:
         reader = csv.reader(in_f, delimiter="|")
-        try:
-            header = next(reader)
-        except StopIteration:
-            header = ["Text", "Date", "URL", "Source"]
+        header = next(reader, None) or ["Text", "Date", "URL", "Source"]
 
         col_index = {name: idx for idx, name in enumerate(header)}
         if "Text" not in col_index or "URL" not in col_index:
@@ -226,76 +239,43 @@ def deduplicate_by_url(
         writer = csv.writer(out_f, delimiter="|", quoting=csv.QUOTE_NONE)
         writer.writerow(["Text", "Date", "URL", "Source"])
         for row in best_rows.values():
-            writer.writerow([row["Text"], row["Date"], row["URL"], row.get("Source","")])
+            writer.writerow([row["Text"], row["Date"], row["URL"], row.get("Source", "")])
 
 
-def run_filter_and_dedup(
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def filtermerge(
     input_dir: str,
     output_file: str,
-    query: Optional[str],
+    *,
+    query: Optional[str] = None,
     keep_temp: bool = False,
+    verbose: bool = True,
 ) -> None:
-    """Build query expression, filter CSVs, then deduplicate by URL."""
-    expr, phrases = build_query_expr(query)
+    """Filter CSVs in `input_dir` and write one deduplicated output CSV.
 
+    Args:
+        input_dir: directory containing per-file CSVs (e.g. from reconstruct.py).
+        output_file: final output CSV path.
+        query: boolean query string, or None for no filtering.
+        keep_temp: keep the intermediate `.tmp` file if True.
+        verbose: print progress messages if True.
+    """
+    expr, phrases = build_query_expr(query)
     temp_output = output_file + ".tmp"
 
-    print(f"Filtering CSV files in {input_dir} into temporary file {temp_output}.")
+    if verbose:
+        print(f"Filtering CSV files in {input_dir} into temporary file {temp_output}.")
     filter_csvs_to_temp(input_dir, temp_output, expr, phrases)
 
-    print(f"Deduplicating by URL and writing final output to {output_file}.")
+    if verbose:
+        print(f"Deduplicating by URL and writing final output to {output_file}.")
     deduplicate_by_url(temp_output, output_file)
 
     if not keep_temp and os.path.exists(temp_output):
         os.remove(temp_output)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Filter reconstructed article CSV files with a Boolean query and "
-            "produce a single deduplicated CSV."
-        )
-    )
-    parser.add_argument(
-        "--input-dir",
-        required=True,
-        help="Directory containing article CSV files produced by the reconstruction step.",
-    )
-    parser.add_argument(
-        "--output",
-        required=True,
-        help="Path for the final output CSV file.",
-    )
-    parser.add_argument(
-        "--query",
-        required=False,
-        default=None,
-        help=(
-            "Boolean query with AND, OR, NOT and parentheses. Example: "
-            "((elezioni OR voto) AND (regionali OR campania)) "
-            "OR ((fico OR cirielli) AND NOT veneto)"
-        ),
-    )
-    parser.add_argument(
-        "--keep-temp",
-        action="store_true",
-        help="Keep the intermediate temporary CSV file.",
-    )
-
-    args = parser.parse_args()
-
-    try:
-        run_filter_and_dedup(
-            input_dir=args.input_dir,
-            output_file=args.output,
-            query=args.query,
-            keep_temp=args.keep_temp,
-        )
-    except ValueError as exc:
-        print(f"Error: {exc}")
-        raise SystemExit(1)
-
-
-if __name__ == "__main__":
-    main()
+__all__ = ["filtermerge", "build_query_expr"]

@@ -1,0 +1,26 @@
+title: gdeltnews
+description: Code for reconstructing full-text news articles from the GDELT Web News NGrams 3.0 dataset
+remote_theme: just-the-docs/just-the-docs
+
+# GitHub Pages project site settings
+url: "https://iandreafc.github.io"
+baseurl: "/gdeltnews"
+
+color_scheme: light
+search_enabled: true
+
+aux_links:
+  "GitHub repository":
+    - "https://github.com/iandreafc/gdeltnews"
+
+gh_edit_link: true
+gh_edit_link_text: "Edit this page on GitHub"
+gh_edit_repository: "https://github.com/iandreafc/gdeltnews"
+gh_edit_branch: "main"
+gh_edit_view_mode: "tree"
+gh_edit_source: "docs"
+
+plugins:
+  - jekyll-remote-theme
+
+permalink: pretty

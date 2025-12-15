@@ -1,30 +1,25 @@
-## Reconstructing Full-Text News Articles from GDELT - gdeltnews
+---
+layout: default
+title: Quickstart guide
+nav_order: 2
+---
 
-Reconstruct full news article text from the GDELT Web News NGrams 3.0 dataset.
+# Quickstart guide - gdeltnews
 
 This package helps you:
-1) download GDELT Web NGrams files for a time range,
-2) reconstruct article text from overlapping n-gram fragments,
-3) filter and merge reconstructed CSVs using Boolean queries.
+- download GDELT Web NGrams files for a time range,
+- reconstruct article text from overlapping n-gram fragments,
+- filter and merge reconstructed CSVs using Boolean queries.
 
 To learn more about the dataset, please visit the official announcement:
 [https://blog.gdeltproject.org/announcing-the-new-web-news-ngrams-3-0-dataset/](https://blog.gdeltproject.org/announcing-the-new-web-news-ngrams-3-0-dataset/)
 
 Input files look like:
-http://data.gdeltproject.org/gdeltv3/webngrams/20250316000100.webngrams.json.gz
+[http://data.gdeltproject.org/gdeltv3/webngrams/20250316000100.webngrams.json.gz](http://data.gdeltproject.org/gdeltv3/webngrams/20250316000100.webngrams.json.gz)
 
 Reconstruction quality depends on the n-gram fragments available in the dataset.
 
-## Install
-
-```bash
-pip install gdeltnews
-```
-
-## Quickstart and Docs
-The package is documented [here](https://iandreafc.github.io/gdeltnews/).
-
-### Step 1: Download Web NGrams files
+## Step 1: Download Web NGrams files
 
 ```bash
 from gdeltnews.download import download
@@ -37,7 +32,7 @@ download(
 )
 ```
 
-### Step 2: Reconstruct articles (run as a script, not in Jupyter)
+## Step 2: Reconstruct articles (run as a script, not in Jupyter)
 Multiprocessing can be problematic inside notebooks. Run this from a `.py` script.
 
 ```bash
@@ -56,7 +51,7 @@ if __name__ == "__main__":
     main()
 ```
 
-### Step 3: Filter, deduplicate, and merge CSVs
+## Step 3: Filter, deduplicate, and merge CSVs
 
 ```bash
 from gdeltnews.filtermerge import filtermerge
@@ -69,13 +64,3 @@ filtermerge(
 ```
 
 Advanced users can pre-filter and download GDELT data via Google BigQuery, then process it directly with `wordmatch.py`.
-
-## Citation
-
-If you use this package for research, please cite:
-
-A. Fronzetti Colladon, R. Vestrelli (2025). “A Python Tool for Reconstructing Full News Text from GDELT.” [https://arxiv.org/abs/2504.16063](https://arxiv.org/abs/2504.16063)
-
-## Credits
-
-Code co-developed with [robves99](https://github.com/robves99).

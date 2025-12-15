@@ -1,19 +1,26 @@
-#!/usr/bin/env python3
+"""Download GDELT Web NGrams 3.0 JSON.GZ files for a time range.
+
+This module exposes a single public entrypoint, :func:`download`, that takes
+normal Python parameters (no CLI).
+
+Example:
+
+    from download import download
+
+    download(
+        "2025-03-15T00:00:00",
+        "2025-03-15T00:10:00",
+        outdir="gdeltdata",
+        decompress=True,
+    )
 """
-Step 1: download GDELT Web NGrams files for a time range.
 
-Downloads GDELT Web NGrams 3.0 JSON.GZ files for a given UTC time range
-and stores them under a local directory (default "gdeltdata").
-
-By default, both the compressed (.json.gz) and decompressed (.json) versions
-are created. If --no-decompress is used, only .json.gz files are written.
-"""
-
-import argparse
+from __future__ import annotations
 import datetime as dt
 import gzip
 import os
-from typing import Iterable, Optional
+from dataclasses import dataclass
+from typing import Iterable, Optional, Union
 
 import requests
 from tqdm import tqdm
@@ -21,6 +28,25 @@ from tqdm import tqdm
 
 GDELT_BASE_URL = "http://data.gdeltproject.org/gdeltv3/webngrams"
 
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+
+TimestampLike = Union[str, dt.datetime]
+
+
+@dataclass(frozen=True)
+class DownloadStats:
+    """Simple download summary returned by :func:`download`."""
+    requested_minutes: int
+    downloaded_gz: int
+    decompressed_json: int
+
+
+# ---------------------------------------------------------------------------
+# Time helpers
+# ---------------------------------------------------------------------------
 
 def parse_timestamp(ts: str) -> dt.datetime:
     """Parse a timestamp string into a naive UTC datetime.
@@ -47,6 +73,13 @@ def parse_timestamp(ts: str) -> dt.datetime:
     raise ValueError(f"Unrecognized timestamp format: {ts}")
 
 
+def _coerce_timestamp(value: TimestampLike) -> dt.datetime:
+    """Accept either a datetime or a timestamp string."""
+    if isinstance(value, dt.datetime):
+        return value
+    return parse_timestamp(str(value))
+
+
 def iter_minutes(start: dt.datetime, end: dt.datetime) -> Iterable[dt.datetime]:
     """Yield every minute from start to end inclusive."""
     if end < start:
@@ -64,9 +97,14 @@ def gdelt_filename_for_minute(ts: dt.datetime) -> str:
     return ts.strftime("%Y%m%d%H%M%S") + ".webngrams.json.gz"
 
 
+# ---------------------------------------------------------------------------
+# Download and decompression
+# ---------------------------------------------------------------------------
+
 def download_gdelt_file(
     ts: dt.datetime,
     dest_dir: str,
+    *,
     overwrite: bool = False,
     timeout: int = 30,
     quiet: bool = False,
@@ -130,16 +168,36 @@ def decompress_gzip(path_gz: str) -> str:
     return path_json
 
 
-def run_download(
-    start_ts: str,
-    end_ts: str,
-    outdir: str,
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def _download_range(
+    start: TimestampLike,
+    end: TimestampLike,
+    *,
+    outdir: str = "gdeltdata",
     overwrite: bool = False,
-    no_decompress: bool = False,
-) -> None:
-    """Download GDELT files for the given time range and optionally decompress."""
-    start_dt = parse_timestamp(start_ts)
-    end_dt = parse_timestamp(end_ts)
+    decompress: bool = True,
+    timeout: int = 30,
+    show_progress: bool = True,
+) -> DownloadStats:
+    """Download GDELT Web NGrams files for the given time range.
+
+    Args:
+        start: start timestamp (datetime or supported string format).
+        end: end timestamp (datetime or supported string format).
+        outdir: destination directory.
+        overwrite: redownload even if .gz exists.
+        decompress: if True, also write decompressed .json files.
+        timeout: HTTP request timeout seconds.
+        show_progress: whether to show a tqdm progress bar.
+
+    Returns:
+        DownloadStats with requested slot count and successful counts.
+    """
+    start_dt = _coerce_timestamp(start)
+    end_dt = _coerce_timestamp(end)
 
     minutes = list(iter_minutes(start_dt, end_dt))
     total = len(minutes)
@@ -151,13 +209,23 @@ def run_download(
     downloaded = 0
     decompressed = 0
 
-    for ts in tqdm(minutes, desc="Downloading", unit="file"):
-        gz_path = download_gdelt_file(ts, outdir, overwrite=overwrite, quiet=True)
+    iterator = minutes
+    if show_progress:
+        iterator = tqdm(minutes, desc="Downloading", unit="file")
+
+    for ts in iterator:
+        gz_path = download_gdelt_file(
+            ts,
+            outdir,
+            overwrite=overwrite,
+            timeout=timeout,
+            quiet=True,
+        )
         if gz_path is None:
             continue
         downloaded += 1
 
-        if not no_decompress:
+        if decompress:
             try:
                 decompress_gzip(gz_path)
                 decompressed += 1
@@ -165,57 +233,40 @@ def run_download(
                 print(f"Decompression failed for {gz_path}: {exc}")
 
     print(f"Downloaded {downloaded} .gz files into {outdir}.")
-    if not no_decompress:
+    if decompress:
         print(f"Decompressed {decompressed} files to .json in {outdir}.")
 
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Download GDELT Web NGrams files for a time range into a directory "
-            "and optionally decompress them to JSON."
-        )
-    )
-    parser.add_argument(
-        "--start",
-        required=True,
-        help="Start timestamp (UTC), for example 2025-03-15T00:00:00 or 20250315000000.",
-    )
-    parser.add_argument(
-        "--end",
-        required=True,
-        help="End timestamp (UTC), for example 2025-03-16T23:59:00 or 20250316235900.",
-    )
-    parser.add_argument(
-        "--outdir",
-        default="gdeltdata",
-        help='Output directory for downloaded files (default: "gdeltdata").',
-    )
-    parser.add_argument(
-        "--overwrite",
-        action="store_true",
-        help="Redownload files even if the .gz file already exists.",
-    )
-    parser.add_argument(
-        "--no-decompress",
-        action="store_true",
-        help="Skip decompression of .gz files to .json.",
+    return DownloadStats(
+        requested_minutes=total,
+        downloaded_gz=downloaded,
+        decompressed_json=decompressed,
     )
 
-    args = parser.parse_args()
 
-    try:
-        run_download(
-            start_ts=args.start,
-            end_ts=args.end,
-            outdir=args.outdir,
-            overwrite=args.overwrite,
-            no_decompress=args.no_decompress,
-        )
-    except ValueError as exc:
-        print(f"Error: {exc}")
-        raise SystemExit(1)
+def download(
+    start: TimestampLike,
+    end: TimestampLike,
+    *,
+    outdir: str = "gdeltdata",
+    overwrite: bool = False,
+    decompress: bool = True,
+    timeout: int = 30,
+    show_progress: bool = True,
+) -> DownloadStats:
+    """Download GDELT Web NGrams files for the given time range.
+
+    This is the primary API for this module.
+    """
+    return _download_range(
+        start,
+        end,
+        outdir=outdir,
+        overwrite=overwrite,
+        decompress=decompress,
+        timeout=timeout,
+        show_progress=show_progress,
+    )
 
 
-if __name__ == "__main__":
-    main()
+# Alias kept for convenience for existing imports (non-CLI).
+__all__ = ["DownloadStats", "download", "parse_timestamp"]

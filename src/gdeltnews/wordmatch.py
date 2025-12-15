@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Core logic for reconstructing articles from GDELT Web NGrams files.
 
-Given a decompressed .webngrams.json file, this module:
+Given a decompressed *.webngrams.json file, this module:
 
 1. Loads entries grouped by URL.
 2. Applies optional language and URL filters.
@@ -9,7 +9,7 @@ Given a decompressed .webngrams.json file, this module:
 4. Reconstructs full article text by merging overlapping fragments.
 5. Writes a CSV with columns: Text|Date|URL|Source.
 
-Used by step2_reconstruct_gdelt.py via process_file_multiprocessing.
+This module is called by `reconstruct.py`, but can also be imported directly.
 """
 
 import csv
@@ -398,3 +398,42 @@ def process_file_multiprocessing(
             writer.writerow([art.get("text", ""), art.get("date", ""), art.get("url", ""), art.get("source", "")])
 
     print(f"Wrote {len(results_sorted)} articles to {output_file}")
+
+
+# ---------------------------------------------------------------------------
+# Convenience wrapper / public surface
+# ---------------------------------------------------------------------------
+
+__all__ = [
+    "process_file_multiprocessing",
+    "reconstruct_webngrams_file",
+    "load_and_filter_data",
+    "process_article",
+    "reconstruct_sentence",
+]
+
+
+def reconstruct_webngrams_file(
+    input_file: str,
+    output_file: str,
+    *,
+    language: str | None = "en",
+    url_filters: str | list[str] | tuple[str, ...] | set[str] | None = None,
+    processes: int | None = None,
+) -> None:
+    """Friendly wrapper around `process_file_multiprocessing`.
+
+    Args:
+        input_file: path to a decompressed *.webngrams.json file.
+        output_file: path to the output CSV file.
+        language: language code to keep (None = keep all).
+        url_filters: URL substring or iterable of substrings to keep.
+        processes: number of worker processes (None = CPU count).
+    """
+    process_file_multiprocessing(
+        input_file=input_file,
+        output_file=output_file,
+        language_filter=language,
+        url_filter=url_filters,
+        num_processes=processes,
+    )

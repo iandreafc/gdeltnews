@@ -1,0 +1,10 @@
+/* Slightly wider content for code-heavy docs */
+.main-content {
+  max-width: 1100px;
+}
+
+/* Make long code lines wrap rather than overflow */
+pre code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}

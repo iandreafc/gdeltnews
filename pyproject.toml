@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gdeltnews"
+version = "1.0.0"
+description = "Reconstruct full-text news articles from GDELT Web News NGrams 3.0"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {file = "LICENSE"}
+authors = [{ name = "Andrea Fronzetti Colladon" }, { name = "Roberto Vestrelli" }]
+dependencies = [
+  "requests>=2.0",
+  "tqdm>=4.0",
+  "boolean.py>=5.0"
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+]
+keywords = ["gdelt", "webngrams", "news", "nlp"]
+
+[project.urls]
+Homepage = "https://github.com/iandreafc/gdeltnews"
+Repository = "https://github.com/iandreafc/gdeltnews"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
