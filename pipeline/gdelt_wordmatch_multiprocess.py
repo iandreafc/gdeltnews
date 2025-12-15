@@ -7,7 +7,7 @@ Given a decompressed .webngrams.json file, this module:
 2. Applies optional language and URL filters.
 3. Builds sentence fragments from pre/ngram/post.
 4. Reconstructs full article text by merging overlapping fragments.
-5. Writes a CSV with columns: Text|Date|URL.
+5. Writes a CSV with columns: Text|Date|URL|Source.
 
 Used by step2_reconstruct_gdelt.py via process_file_multiprocessing.
 """
@@ -15,6 +15,7 @@ Used by step2_reconstruct_gdelt.py via process_file_multiprocessing.
 import csv
 import json
 import re
+from functools import partial
 from collections import defaultdict
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 
@@ -277,12 +278,39 @@ def _clean_text(text: str) -> str:
     return text
 
 
-def process_article(url_entries_tuple: Tuple[str, List[Entry]]) -> Dict[str, str]:
+
+def determine_source_label(url: str, url_filters: Optional[List[str]] = None) -> str:
+    """Derive a source label from a URL and a list of URL substrings.
+
+    Rules:
+      - If exactly one filter matches, return that filter string.
+      - If multiple filters match, return 'Multiple URL matched'.
+      - If no filters are provided (None/empty), return ''.
+      - If filters are provided but none match, return '' (should be rare if filtering was applied).
+    """
+    if not url_filters:
+        return ""
+
+    url_cf = url.casefold()
+    matches = [f for f in url_filters if f and str(f).casefold() in url_cf]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        return "Multiple URL matched"
+    return ""
+
+
+def process_article(
+    url_entries_tuple: Tuple[str, List[Entry]],
+    url_filters: Optional[List[str]] = None,
+) -> Dict[str, str]:
     """Process a single article; designed to be run in parallel."""
     url, entries = url_entries_tuple
 
+    source = determine_source_label(url, url_filters)
+
     if not entries:
-        return {"url": url, "text": "", "date": ""}
+        return {"url": url, "text": "", "date": "", "source": source}
 
     # Sort entries by position
     entries.sort(key=lambda x: int(x.get("pos", 0)))
@@ -298,7 +326,7 @@ def process_article(url_entries_tuple: Tuple[str, List[Entry]]) -> Dict[str, str
     raw_date = str(entries[0].get("date", "")) or ""
     date_only = raw_date[:10] if len(raw_date) >= 10 else ""
 
-    return {"url": url, "text": text, "date": date_only}
+    return {"url": url, "text": text, "date": date_only, "source": source}
 
 
 # ---------------------------------------------------------------------------
@@ -331,11 +359,19 @@ def process_file_multiprocessing(
         # Still create a CSV with just a header; step 2 may delete it later if empty.
         with open(output_file, "w", newline="", encoding="utf-8") as out_f:
             writer = csv.writer(out_f, delimiter="|", quoting=csv.QUOTE_NONE)
-            writer.writerow(["Text", "Date", "URL"])
+            writer.writerow(["Text", "Date", "URL", "Source"])
         return
 
     url_index = {url: idx for idx, url in enumerate(url_order)}
     work_items = list(articles.items())
+
+    # Normalize URL filters for source labeling (same rules as filtering)
+    if url_filter is None:
+        url_filters_list: Optional[List[str]] = None
+    elif isinstance(url_filter, (list, tuple, set)):
+        url_filters_list = [str(f) for f in url_filter]
+    else:
+        url_filters_list = [str(url_filter)]
 
     if num_processes is None or num_processes <= 0:
         num_processes = mp.cpu_count()
@@ -345,7 +381,7 @@ def process_file_multiprocessing(
 
     with mp.Pool(processes=num_processes) as pool:
         for res in tqdm(
-            pool.imap_unordered(process_article, work_items, chunksize=10),
+            pool.imap_unordered(partial(process_article, url_filters=url_filters_list), work_items, chunksize=10),
             total=len(work_items),
             desc="Reconstructing articles",
         ):
@@ -357,8 +393,8 @@ def process_file_multiprocessing(
     # Write output CSV
     with open(output_file, "w", newline="", encoding="utf-8") as out_f:
         writer = csv.writer(out_f, delimiter="|", quoting=csv.QUOTE_NONE)
-        writer.writerow(["Text", "Date", "URL"])
+        writer.writerow(["Text", "Date", "URL", "Source"])
         for art in results_sorted:
-            writer.writerow([art.get("text", ""), art.get("date", ""), art.get("url", "")])
+            writer.writerow([art.get("text", ""), art.get("date", ""), art.get("url", ""), art.get("source", "")])
 
     print(f"Wrote {len(results_sorted)} articles to {output_file}")

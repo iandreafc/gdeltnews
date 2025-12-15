@@ -3,7 +3,7 @@
 
 Reads article CSV files produced by the reconstruction step, filters articles
 with a Boolean query (AND / OR / NOT with parentheses), and writes a single
-CSV with deduplicated URLs (keeping the longest text per URL).
+CSV with deduplicated URLs (keeping the longest text per URL) and a Source label column when available.
 
 Query syntax:
 - Operators: AND, OR, NOT (case-insensitive).
@@ -139,7 +139,7 @@ def filter_csvs_to_temp(
     """Filter rows according to expr/phrases and write to a temporary CSV.
 
     Expected columns in the source CSVs:
-        Text|Date|URL
+        Text|Date|URL|Source (Source may be empty)
 
     Column order can differ, as long as 'Text' and 'URL' exist.
     """
@@ -149,7 +149,7 @@ def filter_csvs_to_temp(
 
     with open(temp_output, "w", newline="", encoding="utf-8") as out_f:
         writer = csv.writer(out_f, delimiter="|", quoting=csv.QUOTE_NONE)
-        writer.writerow(["Text", "Date", "URL"])
+        writer.writerow(["Text", "Date", "URL", "Source"])
 
         for path in csv_files:
             with open(path, "r", encoding="utf-8") as in_f:
@@ -167,6 +167,7 @@ def filter_csvs_to_temp(
                 text_idx = col_index["Text"]
                 date_idx = col_index.get("Date")
                 url_idx = col_index["URL"]
+                source_idx = col_index.get("Source")
 
                 for row in reader:
                     if len(row) <= max(text_idx, url_idx):
@@ -174,11 +175,12 @@ def filter_csvs_to_temp(
                     text = row[text_idx]
                     url = row[url_idx]
                     date = row[date_idx] if date_idx is not None and date_idx < len(row) else ""
+                    source = row[source_idx] if source_idx is not None and source_idx < len(row) else ""
 
                     if not text_matches_query(text, expr, phrases):
                         continue
 
-                    writer.writerow([text, date, url])
+                    writer.writerow([text, date, url, source])
 
 
 def deduplicate_by_url(
@@ -196,7 +198,7 @@ def deduplicate_by_url(
         try:
             header = next(reader)
         except StopIteration:
-            header = ["Text", "Date", "URL"]
+            header = ["Text", "Date", "URL", "Source"]
 
         col_index = {name: idx for idx, name in enumerate(header)}
         if "Text" not in col_index or "URL" not in col_index:
@@ -205,6 +207,7 @@ def deduplicate_by_url(
         text_idx = col_index["Text"]
         date_idx = col_index.get("Date")
         url_idx = col_index["URL"]
+        source_idx = col_index.get("Source")
 
         for row in reader:
             if len(row) <= max(text_idx, url_idx):
@@ -213,16 +216,17 @@ def deduplicate_by_url(
             text = row[text_idx]
             url = row[url_idx]
             date = row[date_idx] if date_idx is not None and date_idx < len(row) else ""
+            source = row[source_idx] if source_idx is not None and source_idx < len(row) else ""
 
             prev = best_rows.get(url)
             if prev is None or len(text) > len(prev["Text"]):
-                best_rows[url] = {"Text": text, "Date": date, "URL": url}
+                best_rows[url] = {"Text": text, "Date": date, "URL": url, "Source": source}
 
     with open(final_output, "w", newline="", encoding="utf-8") as out_f:
         writer = csv.writer(out_f, delimiter="|", quoting=csv.QUOTE_NONE)
-        writer.writerow(["Text", "Date", "URL"])
+        writer.writerow(["Text", "Date", "URL", "Source"])
         for row in best_rows.values():
-            writer.writerow([row["Text"], row["Date"], row["URL"]])
+            writer.writerow([row["Text"], row["Date"], row["URL"], row.get("Source","")])
 
 
 def run_filter_and_dedup(
