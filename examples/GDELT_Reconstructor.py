@@ -15,6 +15,7 @@ download(
 #Delete decompressed files
 #Do not run inside Jupyter, due to multiprocessing issues
 from gdeltnews.reconstruct import reconstruct
+from multiprocessing import freeze_support
 
 def main():
     reconstruct(
@@ -26,6 +27,7 @@ def main():
     )
 
 if __name__ == "__main__":
+    freeze_support()
     main()
 
 

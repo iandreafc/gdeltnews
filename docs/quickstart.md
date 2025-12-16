@@ -36,6 +36,7 @@ download(
 Multiprocessing can be problematic inside notebooks. Run this from a `.py` script.
 
 ```bash
+from multiprocessing import freeze_support
 from gdeltnews.reconstruct import reconstruct
 
 def main():
@@ -48,6 +49,7 @@ def main():
     )
 
 if __name__ == "__main__":
+    freeze_support()  # important on Windows
     main()
 ```
 
