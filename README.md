@@ -15,14 +15,20 @@ http://data.gdeltproject.org/gdeltv3/webngrams/20250316000100.webngrams.json.gz
 
 Reconstruction quality depends on the n-gram fragments available in the dataset.
 
-## Install
+## Docs
+
+This package documentation is available [here](https://iandreafc.github.io/gdeltnews/), and a more detailed explanation of the functions’ logic is provided in the accompanying [paper](https://arxiv.org/abs/2504.16063).
+
+## GUI Version
+If you prefer to use a **software with a graphical user interface** that runs this code, you can find it [here](https://github.com/iandreafc/gdeltnews/tree/main/GUI) and read the [instructions here](https://iandreafc.github.io/gdeltnews/gui).
+
+## Python Package Quickstart
+
+### Install
 
 ```bash
 pip install gdeltnews
 ```
-
-## Quickstart and Docs
-The package is documented [here](https://iandreafc.github.io/gdeltnews/).
 
 ### Step 1: Download Web NGrams files
 
@@ -72,12 +78,9 @@ filtermerge(
 
 Advanced users can pre-filter and download GDELT data via Google BigQuery, then process it directly with `wordmatch.py`.
 
-## Citation
+## Citation and Credits
 
 If you use this package for research, please cite:
-
 A. Fronzetti Colladon, R. Vestrelli (2025). “A Python Tool for Reconstructing Full News Text from GDELT.” [https://arxiv.org/abs/2504.16063](https://arxiv.org/abs/2504.16063)
-
-## Credits
 
 Code co-developed with [robves99](https://github.com/robves99).
