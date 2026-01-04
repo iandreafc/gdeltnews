@@ -369,11 +369,11 @@ class GdeltNewsGUI:
         )
         row += 1
 
-        self.keep_temp_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(tab, text="Keep temporary file", variable=self.keep_temp_var).grid(
-            row=row, column=0, sticky=tk.W, padx=10, pady=5
-        )
-        row += 1
+        #self.keep_temp_var = tk.BooleanVar(value=False)
+        #ttk.Checkbutton(tab, text="Keep temporary file", variable=self.keep_temp_var).grid(
+        #    row=row, column=0, sticky=tk.W, padx=10, pady=5
+        #)
+        #row += 1
 
         # Run button
         ttk.Button(tab, text="Run filter/merge", command=self._run_filtermerge).grid(
@@ -654,7 +654,7 @@ class GdeltNewsGUI:
             return
 
         query = self.query_var.get().strip() or None
-        keep_temp = self.keep_temp_var.get()
+        #keep_temp = self.keep_temp_var.get()
 
         # Reset progress bar before starting
         self.filter_progress.config(value=0)
@@ -717,8 +717,8 @@ class GdeltNewsGUI:
                 0,
                 lambda: self.filter_progress.config(value=100),
             )
-            # Optionally remove the temporary file
-            if not keep_temp and os.path.exists(temp_output):
+            # Remove the temporary file
+            if os.path.exists(temp_output): #not keep_temp
                 try:
                     os.remove(temp_output)
                 except Exception:
