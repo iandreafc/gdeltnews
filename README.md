@@ -81,6 +81,7 @@ Advanced users can pre-filter and download GDELT data via Google BigQuery, then 
 ## Citation and Credits
 
 If you use this package for research, please cite:
+
 Fronzetti Colladon, A., & Vestrelli, R. (2026). Free Access to World News: Reconstructing Full-Text Articles from GDELT. Big Data and Cognitive Computing, 10(2), 45. [https://doi.org/10.3390/bdcc10020045](https://doi.org/10.3390/bdcc10020045)
 
 Code co-developed with [robves99](https://github.com/robves99).
