@@ -17,7 +17,7 @@ Reconstruction quality depends on the n-gram fragments available in the dataset.
 
 ## Docs
 
-This package documentation is available [here](https://iandreafc.github.io/gdeltnews/), and a more detailed explanation of the functions’ logic is provided in the accompanying [paper](https://arxiv.org/abs/2504.16063).
+This package documentation is available [here](https://iandreafc.github.io/gdeltnews/), and a more detailed explanation of the functions’ logic is provided in the accompanying [paper](https://doi.org/10.3390/bdcc10020045).
 
 ## GUI Version
 If you prefer to use a **software with a graphical user interface** that runs this code, you can find it [here](https://github.com/iandreafc/gdeltnews/tree/main/GUI) and read the [instructions here](https://iandreafc.github.io/gdeltnews/gui).
@@ -81,6 +81,6 @@ Advanced users can pre-filter and download GDELT data via Google BigQuery, then 
 ## Citation and Credits
 
 If you use this package for research, please cite:
-A. Fronzetti Colladon, R. Vestrelli (2025). “A Python Tool for Reconstructing Full News Text from GDELT.” [https://arxiv.org/abs/2504.16063](https://arxiv.org/abs/2504.16063)
+Fronzetti Colladon, A., & Vestrelli, R. (2026). Free Access to World News: Reconstructing Full-Text Articles from GDELT. Big Data and Cognitive Computing, 10(2), 45. [https://doi.org/10.3390/bdcc10020045](https://doi.org/10.3390/bdcc10020045)
 
 Code co-developed with [robves99](https://github.com/robves99).

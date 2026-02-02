@@ -25,10 +25,10 @@ If you prefer to use a **software with a graphical user interface** that runs th
 
 See the quickstart guide [here](https://iandreafc.github.io/gdeltnews/quickstart/).
 
-The package functions are documented [here](https://iandreafc.github.io/gdeltnews/functions/), and their underlying logic is explained in more detail in the accompanying [paper](https://arxiv.org/abs/2504.16063).
+The package functions are documented [here](https://iandreafc.github.io/gdeltnews/functions/), and their underlying logic is explained in more detail in the accompanying [paper](https://doi.org/10.3390/bdcc10020045).
 
 ## Citation
 
 If you use this package for research, please cite:
 
-A. Fronzetti Colladon, R. Vestrelli (2025). “A Python Tool for Reconstructing Full News Text from GDELT.” [https://arxiv.org/abs/2504.16063](https://arxiv.org/abs/2504.16063)
+Fronzetti Colladon, A., & Vestrelli, R. (2026). Free Access to World News: Reconstructing Full-Text Articles from GDELT. Big Data and Cognitive Computing, 10(2), 45. [https://doi.org/10.3390/bdcc10020045](https://doi.org/10.3390/bdcc10020045)

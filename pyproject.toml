@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gdeltnews"
-version = "1.0.0"
+version = "1.0.1"
 description = "Reconstruct full-text news articles from GDELT Web News NGrams 3.0"
 readme = "README.md"
 requires-python = ">=3.9"
