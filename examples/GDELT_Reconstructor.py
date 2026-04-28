@@ -12,7 +12,7 @@ download(
 #Decompress files
 #Filter by URL and Language
 #Reconstruct articles and produce CSVs
-#Delete decompressed files
+#Read compressed files directly
 #Do not run inside Jupyter, due to multiprocessing issues
 from gdeltnews.reconstruct import reconstruct
 from multiprocessing import freeze_support

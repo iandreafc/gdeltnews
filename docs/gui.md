@@ -83,6 +83,8 @@ Reconstruct, and Filter/Merge.
   reconstructed CSVs and optionally specify a language code (e.g.
   `en` or `it`), one or more URL filters (comma‑separated) and the
   number of worker processes to use (leave blank to use all cores).
+  Reconstruction reads the compressed files directly; decompression
+  during download is optional and is no longer required for this step.
 
 * **Filter/Merge** – select the directory containing the per‑file
   CSVs, choose a destination path for the final CSV and write a

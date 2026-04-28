@@ -45,6 +45,8 @@ download(
 
 ### Step 2: Reconstruct articles (run as a script, not in Jupyter)
 Multiprocessing can be problematic inside notebooks. Run this from a `.py` script.
+The compressed `.json.gz` files are read directly, so you do not need to
+decompress them first.
 
 ```bash
 from multiprocessing import freeze_support

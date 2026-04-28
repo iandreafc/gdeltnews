@@ -39,7 +39,6 @@ try:
     )  # type: ignore
     from gdeltnews.reconstruct import (
         find_gz_files as rc_find_gz_files,
-        decompress_gzip as rc_decompress_gzip,
         process_file_multiprocessing as rc_process_file_multiprocessing,
         csv_has_data as rc_csv_has_data,
     )  # type: ignore
@@ -301,10 +300,6 @@ class GdeltNewsGUI:
         ttk.Checkbutton(tab, text="Delete .gz after processing", variable=self.del_gz_var).grid(
             row=row, column=0, sticky=tk.W, padx=10, pady=5
         )
-        self.del_json_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(tab, text="Delete decompressed .json", variable=self.del_json_var).grid(
-            row=row, column=1, sticky=tk.W, padx=10, pady=5
-        )
         row += 1
 
         self.del_empty_csv_var = tk.BooleanVar(value=True)
@@ -561,7 +556,6 @@ class GdeltNewsGUI:
                 return
 
         delete_gz = self.del_gz_var.get()
-        delete_json = self.del_json_var.get()
         delete_empty = self.del_empty_csv_var.get()
 
         # Reset progress bar before starting
@@ -569,6 +563,7 @@ class GdeltNewsGUI:
 
         def task() -> None:
             import os
+            import multiprocessing as mp
             from pathlib import Path
 
             in_path = Path(input_dir)
@@ -584,61 +579,56 @@ class GdeltNewsGUI:
             # ensure output directory exists
             out_path.mkdir(parents=True, exist_ok=True)
 
-            for idx, gz_path in enumerate(gz_files):
-                # Step 1: decompress to .json
-                try:
-                    json_path = rc_decompress_gzip(gz_path)
-                except Exception:
-                    # Skip file if decompression fails
-                    continue
+            # Resolve worker count and create one Pool shared across every file.
+            # Pool startup is expensive on Windows (spawn re-imports the module);
+            # creating one per file dominates wall time on many small inputs.
+            nproc = processes if (processes and processes > 0) else mp.cpu_count()
 
-                # Step 2: determine CSV output path
-                base_name = Path(str(json_path)).stem  # e.g. 20250316000100.webngrams
-                csv_name = f"{base_name}.articles.csv"
-                csv_path = out_path / csv_name
+            with mp.Pool(processes=nproc) as pool:
+                for idx, gz_path in enumerate(gz_files):
+                    # Step 1: determine CSV output path
+                    base_name = gz_path.name[:-len(".json.gz")]  # e.g. 20250316000100.webngrams
+                    csv_name = f"{base_name}.articles.csv"
+                    csv_path = out_path / csv_name
 
-                # Step 3: run multiprocessing reconstruction
-                try:
-                    rc_process_file_multiprocessing(
-                        input_file=str(json_path),
-                        output_file=str(csv_path),
-                        language_filter=language,
-                        url_filter=url_filters_list,
-                        num_processes=processes,
-                    )
-                except Exception:
-                    # Continue even if one file fails
-                    pass
-                finally:
-                    # Step 4: optionally remove decompressed .json
-                    if delete_json:
+                    # Step 2: run multiprocessing reconstruction directly on the .gz.
+                    # show_progress=False silences the inner tqdm bar — the GUI has
+                    # its own per-file progress bar (self.recon_progress).
+                    try:
+                        rc_process_file_multiprocessing(
+                            input_file=str(gz_path),
+                            output_file=str(csv_path),
+                            language_filter=language,
+                            url_filter=url_filters_list,
+                            num_processes=nproc,
+                            pool=pool,
+                            show_progress=False,
+                        )
+                    except Exception:
+                        # Continue even if one file fails
+                        pass
+
+                    # Step 3: optionally remove empty CSVs
+                    if delete_empty and csv_path.exists() and not rc_csv_has_data(csv_path):
                         try:
-                            if Path(json_path).exists():
-                                os.remove(json_path)
+                            os.remove(csv_path)
                         except Exception:
                             pass
 
-                # Step 5: optionally remove empty CSVs
-                if delete_empty and csv_path.exists() and not rc_csv_has_data(csv_path):
-                    try:
-                        os.remove(csv_path)
-                    except Exception:
-                        pass
+                    # Step 4: optionally remove the original .gz file
+                    if delete_gz:
+                        try:
+                            if gz_path.exists():
+                                os.remove(gz_path)
+                        except Exception:
+                            pass
 
-                # Step 6: optionally remove the original .gz file
-                if delete_gz:
-                    try:
-                        if gz_path.exists():
-                            os.remove(gz_path)
-                    except Exception:
-                        pass
-
-                # update progress bar
-                progress = int((idx + 1) / total * 100)
-                self.master.after(
-                    0,
-                    lambda val=progress: self.recon_progress.config(value=val),
-                )
+                    # update progress bar
+                    progress = int((idx + 1) / total * 100)
+                    self.master.after(
+                        0,
+                        lambda val=progress: self.recon_progress.config(value=val),
+                    )
 
         # Run our custom reconstruction task with progress reporting
         self._run_in_thread(task)
