@@ -58,12 +58,12 @@ Filter, merge, and deduplicate reconstructed CSVs.
 - **Inputs**
   - `input_dir`: directory of CSV files (as produced by `reconstruct`)
   - `output_file`: destination CSV path
-  - `query`: Boolean query string using `AND`, `OR`, `NOT` plus parentheses. Use double quotes for phrases, e.g. `"julia roberts"`.
+  - `query`: Boolean query string using `AND`, `OR`, `NOT` plus parentheses. Use double quotes for phrases, e.g. `"julia roberts"`. A term containing anything other than letters/digits/underscore **must** be quoted — write `"centro-destra"`, not `centro-destra`. Every term needs an explicit operator between it and the next.
   - `keep_temp`: keep the intermediate `output_file + ".tmp"` file
   - `verbose`: print progress messages
 
 - **Behavior**
-  - Performs **case-insensitive substring matching** over the `Text` column.
+  - Performs **case-insensitive whole-word matching** over the `Text` column: a query for `butti` matches `Butti` but not `debutti`, `buttiamo` or `Gabutti`. Word boundaries are only required on sides that begin/end with a word character, so `"c++"` and `".net"` still match.
   - Deduplicates by `URL`, keeping the row with the **longest** `Text`.
 
 ---

@@ -90,7 +90,9 @@ Reconstruct, and Filter/Merge.
   CSVs, choose a destination path for the final CSV and write a
   Boolean query to filter the articles.  The query syntax uses
   `AND`, `OR` and `NOT` with parentheses; use double quotes to
-  match phrases.
+  match phrases.  Terms match whole words only (`butti` does not
+  match `debutti`), and any term containing punctuation must be
+  quoted — write `"centro-destra"`, not `centro-destra`.
 
 Click the **Run** button in each operational tab (Download,
 Reconstruct or Filter/Merge) to execute the corresponding

@@ -19,7 +19,7 @@ import re
 from contextlib import contextmanager
 from functools import partial
 from collections import defaultdict
-from typing import Dict, Iterable, Iterator, List, Optional, TextIO, Tuple, Union
+from typing import BinaryIO, Dict, Iterable, Iterator, List, Optional, Tuple, Union
 
 import multiprocessing as mp
 from tqdm import tqdm
@@ -29,14 +29,19 @@ Entry = Dict[str, Union[str, int]]
 
 
 @contextmanager
-def _open_webngrams_text(input_file: str) -> Iterator[TextIO]:
-    """Open either a decompressed JSON file or a gzipped JSON file as text."""
+def _open_webngrams_binary(input_file: str) -> Iterator[BinaryIO]:
+    """Open either a decompressed JSON file or a gzipped JSON file in binary.
+
+    Binary mode lets the loader run a cheap byte-substring pre-filter on each
+    raw line and skip the UTF-8 decode + ``json.loads`` for the ~99.9% of
+    lines that can't pass the language/URL filters anyway.
+    """
     input_path = str(input_file)
     if input_path.lower().endswith(".gz"):
-        with gzip.open(input_path, "rt", encoding="utf-8") as file:
+        with gzip.open(input_path, "rb") as file:
             yield file
     else:
-        with open(input_path, "r", encoding="utf-8") as file:
+        with open(input_path, "rb") as file:
             yield file
 
 
@@ -260,15 +265,37 @@ def load_and_filter_data(
     """
     url_filters = _normalize_url_filters(url_filter)
 
+    # Byte-level pre-filters run on the raw line before the expensive
+    # json.loads. Each is a *necessary* condition for the corresponding real
+    # check below, so a survivor is always re-checked and nothing that would
+    # have passed can be dropped here:
+    #   - lang value "xx" is JSON-encoded literally as `"xx"` (codes need no
+    #     escaping), so `b'"xx"'` must appear in any line where lang == "xx".
+    #   - a URL substring filter is, by definition, a substring of the URL,
+    #     which is itself a substring of the raw line.
+    lang_token = (
+        b'"' + language_filter.encode("utf-8") + b'"'
+        if language_filter is not None
+        else None
+    )
+    url_tokens = (
+        [f.encode("utf-8") for f in url_filters] if url_filters else None
+    )
+
     articles: Dict[str, List[Entry]] = defaultdict(list)
     url_order: List[str] = []
     seen: set = set()
 
-    with _open_webngrams_text(input_file) as file:
-        for line in file:
+    with _open_webngrams_binary(input_file) as file:
+        for raw in file:
+            if lang_token is not None and lang_token not in raw:
+                continue
+            if url_tokens is not None and not any(t in raw for t in url_tokens):
+                continue
+
             try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
+                entry = json.loads(raw)
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 continue
 
             if language_filter is not None and entry.get("lang") != language_filter:

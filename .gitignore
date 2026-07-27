@@ -1,1 +1,12 @@
 20250316000100.webngrams.json
+
+# Raw GDELT input data (never commit — can be hundreds of MB)
+examples/gdeltdata/
+*.webngrams.json
+*.webngrams.json.gz
+
+# Python build/cache artifacts
+__pycache__/
+*.pyc
+build/
+src/*.egg-info/

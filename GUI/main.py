@@ -686,7 +686,7 @@ class GdeltNewsGUI:
                             if len(row) <= max(text_idx, url_idx):
                                 continue
                             text_val = row[text_idx]
-                            # Evaluate boolean query (case-insensitive substring match)
+                            # Evaluate boolean query (case-insensitive whole-word match)
                             if not fm_text_matches_query(text_val, expr, phrases):
                                 continue
                             date_val = row[date_idx] if date_idx is not None and date_idx < len(row) else ""

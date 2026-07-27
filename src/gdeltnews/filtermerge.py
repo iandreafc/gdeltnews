@@ -7,12 +7,14 @@ Boolean query (AND / OR / NOT with parentheses), and writes a single CSV with:
 - a `Source` label column when available
 
 Query syntax:
-- Operators: AND, OR, NOT (case-insensitive)
+- Operators: AND, OR, NOT (case-insensitive); every term needs an explicit operator
 - Parentheses: (...) to group
-- Terms: single words (e.g. fico) or quoted phrases ("giorgia meloni")
+- Terms: single words (e.g. fico) or quoted phrases ("giorgia meloni"). A term
+  containing anything but letters/digits/underscore MUST be quoted, so write
+  "centro-destra" and "fratelli d'italia", not centro-destra or d'italia.
 Public entrypoint: :func:`filtermerge`.
 
-Matching: case-insensitive substring search over the `Text` field.
+Matching: case-insensitive whole-word search over the `Text` field.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from __future__ import annotations
 import csv
 import os
 import re
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
@@ -83,6 +86,27 @@ def _extract_phrases(query: str) -> Tuple[str, Dict[str, str]]:
     return q, phrases
 
 
+# boolean.py's tokenizer turns these words into TRUE/FALSE literals, so a bare
+# term like `false` or `none` would silently make its branch constant instead of
+# searching for the word. Hide them behind the same placeholder mechanism.
+_RESERVED_TOKENS = ("true", "false", "none", "1", "0")
+
+
+def _protect_reserved(query: str, phrases: Dict[str, str]) -> str:
+    """Replace bare terms that boolean.py reads as TRUE/FALSE with placeholders.
+
+    Runs after phrase extraction, and the boundary lookarounds keep it away from
+    the digits inside the `PHRASE_<n>` placeholders themselves.
+    """
+    def repl(match: re.Match) -> str:
+        key = f"PHRASE_{len(phrases)}"
+        phrases[key] = match.group(0)
+        return key
+
+    pattern = r"(?<!\w)(?:%s)(?!\w)" % "|".join(_RESERVED_TOKENS)
+    return re.sub(pattern, repl, query, flags=re.IGNORECASE)
+
+
 def build_query_expr(query: Optional[str]):
     """Build and validate the parsed Boolean expression plus phrase mapping.
 
@@ -98,18 +122,46 @@ def build_query_expr(query: Optional[str]):
     # 2) Normalize boolean operators
     q = _normalize_boolean_operators(q)
 
+    # 3) Shield terms boolean.py would read as TRUE/FALSE literals
+    q = _protect_reserved(q, phrases)
+
     algebra = _get_algebra()
 
     try:
         expr = algebra.parse(q)
     except Exception as exc:
-        raise ValueError(f"Invalid Boolean query: {exc}") from exc
+        raise ValueError(
+            f"Invalid Boolean query: {exc}. Terms containing anything but "
+            'letters/digits/underscore must be double-quoted (e.g. "centro-destra"), '
+            "and every term needs an explicit AND / OR / NOT between them."
+        ) from exc
 
     return expr, phrases
 
 
+@lru_cache(maxsize=4096)
+def _term_regex(term_cf: str) -> "re.Pattern[str]":
+    """Whole-word matcher for an already-casefolded term.
+
+    Plain substring matching made `butti` hit `debutti`, `buttiamo`, `farabutti`
+    and surnames like `Gabutti`, so a term must land on word boundaries. The
+    boundary is only asserted on a side that actually starts/ends with a word
+    character, so terms like `c++` or `.net` still match.
+
+    No re.IGNORECASE: the pattern is built from the casefolded term and searched
+    against casefolded text, which makes the cheap `term in text` pre-check in
+    `text_matches_query` an exact necessary condition for this regex.
+    """
+    pat = re.escape(term_cf)
+    if term_cf[:1].isalnum() or term_cf[:1] == "_":
+        pat = r"(?<!\w)" + pat
+    if term_cf[-1:].isalnum() or term_cf[-1:] == "_":
+        pat = pat + r"(?!\w)"
+    return re.compile(pat)
+
+
 def text_matches_query(text: str, expr: Any, phrases: Dict[str, str]) -> bool:
-    """Evaluate expression on a given text (case-insensitive substring match)."""
+    """Evaluate expression on a given text (case-insensitive whole-word match)."""
     if expr is None:
         return True
 
@@ -126,7 +178,10 @@ def text_matches_query(text: str, expr: Any, phrases: Dict[str, str]) -> bool:
         else:
             term = str(name).casefold()
 
-        subs[sym] = algebra.TRUE if term in text_cf else algebra.FALSE
+        # Substring is a necessary condition for the whole-word match, so this
+        # cheap check short-circuits the regex for the vast majority of texts.
+        hit = bool(term) and term in text_cf and _term_regex(term).search(text_cf) is not None
+        subs[sym] = algebra.TRUE if hit else algebra.FALSE
 
     try:
         value = expr.subs(subs).simplify()
