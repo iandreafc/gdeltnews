@@ -9,4 +9,8 @@ examples/gdeltdata/
 __pycache__/
 *.pyc
 build/
-src/*.egg-info/
+dist/
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/

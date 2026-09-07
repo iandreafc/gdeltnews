@@ -14,6 +14,10 @@ Input files look like:
 http://data.gdeltproject.org/gdeltv3/webngrams/20250316000100.webngrams.json.gz
 
 Reconstruction quality depends on the n-gram fragments available in the dataset.
+When a fragment does not overlap anything else it is dropped, so an article can
+come out truncated. Pass `keep_unmerged=True` to `reconstruct()` to append those
+leftover fragments at the end instead of discarding them; the default `False`
+reproduces the original behaviour exactly.
 
 ## Docs
 
@@ -30,6 +34,16 @@ If you prefer to use a **software with a graphical user interface** that runs th
 pip install gdeltnews
 ```
 
+Optionally, install the `fast` extra to decompress the GDELT files with
+[isal](https://pypi.org/project/isal/) instead of the standard library:
+
+```bash
+pip install "gdeltnews[fast]"
+```
+
+This is purely a speed option (roughly 10-15% off the reading time of each
+file). Everything works exactly the same without it.
+
 ### Step 1: Download Web NGrams files
 
 ```bash
@@ -40,8 +54,15 @@ download(
     "2025-11-25T13:59:00",
     outdir="gdeltdata",
     decompress=False,
+    workers=8,   # concurrent downloads
 )
 ```
+
+Files are fetched concurrently over a shared connection pool, and each one is
+retried a few times on network errors. `download()` returns a `DownloadStats`
+telling you how many minute slots were downloaded, how many simply do not
+exist on the GDELT server (`missing`, which is normal) and how many kept
+failing (`failed`, which means a real gap in your data).
 
 ### Step 2: Reconstruct articles (run as a script, not in Jupyter)
 Multiprocessing can be problematic inside notebooks. Run this from a `.py` script.

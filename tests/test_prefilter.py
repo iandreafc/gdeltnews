@@ -61,6 +61,10 @@ LINES = [
     _rec("2025-11-25T10:00:00Z", "f", "it", "https://repubblica.it/a?b=it"),
     # empty url -> dropped
     _rec("2025-11-25T10:00:00Z", "g", "it", ""),
+    # tricky: non-ASCII URL. json.dumps escapes it as ü, so the UTF-8
+    # bytes of a filter like "munchen" with an umlaut never appear in the raw
+    # line -- a byte pre-filter on that filter would silently drop this.
+    _rec("2025-11-25T10:00:00Z", "h", "de", "https://www.zeit.de/münchen/x"),
 ]
 
 
@@ -88,6 +92,12 @@ def main():
         (None, ["repubblica.it"]),
         (None, None),
         ("en", ["repubblica.it"]),
+        # non-ASCII filters must bypass the byte pre-filter entirely
+        ("de", ["münchen"]),
+        (None, ["münchen"]),
+        # mixed: one non-ASCII filter disables the pre-filter for all of them,
+        # so the ASCII ones must still match via the post-parse check
+        (None, ["münchen", "corriere.it"]),
     ]
     for lang, urls in cases:
         _run_case(LINES, lang, urls)

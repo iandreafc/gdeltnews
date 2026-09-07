@@ -10,7 +10,7 @@ This page documents the functions shipped in `src/gdeltnews/` (and the most impo
 
 ## Top-level package exports (`gdeltnews`)
 
-### `download(start, end, *, outdir="gdeltdata", overwrite=False, decompress=True, timeout=30, show_progress=True) -> DownloadStats`
+### `download(start, end, *, outdir="gdeltdata", overwrite=False, decompress=True, timeout=30, show_progress=True, workers=8, retries=3) -> DownloadStats`
 
 Download GDELT Web NGrams minute files for an inclusive time range.
 
@@ -21,16 +21,27 @@ Download GDELT Web NGrams minute files for an inclusive time range.
     - `YYYYMMDDHHMMSS`
   - `outdir`: destination directory for downloaded files
   - `overwrite`: redownload even if the `.gz` already exists locally
-  - `decompress`: if `True`, also write the decompressed `.json` files
+  - `decompress`: if `True`, also write the decompressed `.json` files. Reconstruction reads the `.gz` directly, so leaving this at `False` halves both disk usage and I/O.
   - `timeout`: HTTP timeout in seconds
   - `show_progress`: show a progress bar across minute slots
+  - `workers`: how many minute files to fetch concurrently. This step is I/O bound, so threads are used. Pass `1` for the old strictly-serial behaviour.
+  - `retries`: extra attempts per file on network errors and `5xx` responses
+
+- **Outputs**
+  - `DownloadStats(requested_minutes, downloaded_gz, decompressed_json, missing, failed)`.
+    `missing` and `failed` are deliberately distinct: **missing** means GDELT
+    publishes no file for that minute (normal), while **failed** means the
+    request kept erroring after every retry and there is a genuine gap in the
+    downloaded range.
 
 - **Behavior**
-  - Iterates **minute-by-minute** from `start` to `end` (inclusive), attempting to fetch `<YYYYMMDDHHMMSS>.webngrams.json.gz` from the GDELT Web NGrams base URL.
-  - If a minute file does not exist (non-200 response), it is skipped.
+  - Covers every minute from `start` to `end` (inclusive), fetching `<YYYYMMDDHHMMSS>.webngrams.json.gz` from the GDELT Web NGrams base URL.
+  - All requests share one `requests.Session`, so the connection is reused instead of re-handshaking per file.
+  - A `404` (or any other `4xx`) is treated as "no file for this minute" and is **not** retried. Network errors and `5xx` are retried with exponential backoff, then counted in `failed`.
+  - Each file is written to `<name>.gz.part` and renamed on success, so an interrupted run can never leave a truncated `.gz` that a later run mistakes for complete.
 
 
-### `reconstruct(input_dir="gdeltdata", output_dir="gdeltpreprocessed", *, language=None, url_filters=None, processes=None, delete_gz=False, delete_empty_csv=True, show_progress=True) -> None`
+### `reconstruct(input_dir="gdeltdata", output_dir="gdeltpreprocessed", *, language=None, url_filters=None, processes=None, delete_gz=False, delete_empty_csv=True, show_progress=True, keep_unmerged=False) -> None`
 
 Bulk reconstruction runner for a folder of GDELT `*.webngrams.json.gz` files.
 
@@ -43,6 +54,7 @@ Bulk reconstruction runner for a folder of GDELT `*.webngrams.json.gz` files.
   - `delete_gz`: delete original `.gz` after processing
   - `delete_empty_csv`: delete CSVs that contain only the header row
   - `show_progress`: show a progress bar across files
+  - `keep_unmerged`: if `True`, fragments that never overlapped anything are appended to the article instead of being dropped. Default `False`, which reproduces the historical output exactly.
 
 - **Outputs**
   - Writes one CSV per input file to `output_dir` with delimiter `|` and header:
@@ -77,7 +89,7 @@ Convert raw per-URL entry dictionaries into simplified “sentence fragment” e
 - Builds `sentence` from `pre`, `ngram`, `post`.
 - Normalizes some early-position artifacts (e.g. keeps substring after `" / "` when `pos < 20`).
 
-### `reconstruct_sentence(fragments: list[str], positions: list[int] | None = None) -> str`
+### `reconstruct_sentence(fragments: list[str], positions: list[int] | None = None, keep_unmerged: bool = False) -> str`
 
 Reconstruct a longer text by merging overlapping fragments (word overlap).
 
@@ -85,6 +97,15 @@ Reconstruct a longer text by merging overlapping fragments (word overlap).
 - If `positions` are given, enforces a constraint that prevents obviously wrong reorderings:
   - only appends fragments whose position is not earlier than the current max position
   - only prepends fragments whose position is not later than the current min position
+- Each round selects the fragment with the largest overlap; ties go to the lowest index, and within one fragment an append beats a prepend of equal length.
+- When no remaining fragment overlaps, the merge stops and the leftovers are **dropped** — an article can therefore come out truncated. `keep_unmerged=True` appends them in position order instead.
+
+Internally the candidate overlaps are indexed by their first/last word rather
+than tried one length at a time, and fragments that can no longer be placed are
+pruned. This is a pure speedup (measured ~2-3x on real files): the output is
+identical to the original quadratic scan, which
+`tests/test_reconstruct_equivalence.py` pins down by fuzzing both against each
+other.
 
 ### `remove_overlap(text: str) -> str`
 
@@ -96,6 +117,7 @@ Read a `*.webngrams.json` or `*.webngrams.json.gz` file line-by-line and:
 
 - optionally filter by language (`language_filter=None` keeps all)
 - optionally filter by URL substring(s) — empty/whitespace-only filters are dropped, so passing `[""]` no longer matches every URL
+- skip the raw-byte pre-filter when any URL filter contains non-ASCII characters: GDELT may emit the URL with `\uXXXX` escapes, so the filter's UTF-8 bytes need not appear in the raw line even when the decoded URL matches. Such runs are slightly slower but never lose data
 - transform each kept record into a sentence-level entry inline (one pass over the file)
 - group entries by URL
 - return:
@@ -110,7 +132,7 @@ Derive a `Source` label from URL filters:
 - multiple filters match: returns `"Multiple URL matched"`
 - no filters or no matches: returns `""`
 
-### `process_article((url, entries), url_filters=None) -> dict[str, str]`
+### `process_article((url, entries), url_filters=None, keep_unmerged=False) -> dict[str, str]`
 
 Reconstruct one article (intended for multiprocessing).
 
@@ -123,7 +145,7 @@ Reconstruct one article (intended for multiprocessing).
 
 If reconstruction raises, the exception is caught inside `process_article` so a single bad article cannot kill the multiprocessing worker. The returned dict gains an extra `"error"` key with a short `"ExceptionType: message"` string; `url` and `source` are still populated so the driver can log which article failed.
 
-### `process_file_multiprocessing(input_file, output_file, language_filter="en"|None, url_filter=None, num_processes=None, pool=None, show_progress=True) -> None`
+### `process_file_multiprocessing(input_file, output_file, language_filter="en"|None, url_filter=None, num_processes=None, pool=None, show_progress=True, keep_unmerged=False) -> None`
 
 Core driver for reconstructing one JSON or JSON.GZ file into a CSV.
 
@@ -134,3 +156,8 @@ Core driver for reconstructing one JSON or JSON.GZ file into a CSV.
 - New optional kwargs:
   - `pool`: an existing `multiprocessing.Pool` to reuse. When this driver is called once per input file (as it is from `reconstruct`), passing one pool across all calls avoids the per-file pool-startup cost (significant on Windows where Pool startup re-imports the module).
   - `show_progress`: set to `False` to silence the per-file tqdm bar (useful when an outer caller has its own progress bar).
+  - `keep_unmerged`: forwarded to `reconstruct_sentence`; see above.
+
+Input files are opened with `isal.igzip` when the optional `fast` extra is
+installed (`pip install "gdeltnews[fast]"`) and with the standard library
+`gzip` otherwise. The fallback is automatic and changes nothing but speed.

@@ -1,3 +1,0 @@
-requests>=2.0
-tqdm>=4.0
-boolean.py>=5.0

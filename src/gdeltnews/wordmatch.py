@@ -12,14 +12,24 @@ Given a *.webngrams.json or *.webngrams.json.gz file, this module:
 This module is called by `reconstruct.py`, but can also be imported directly.
 """
 
+from __future__ import annotations
+
 import csv
-import gzip
 import json
 import re
+from bisect import bisect_left, bisect_right
 from contextlib import contextmanager
 from functools import partial
 from collections import defaultdict
 from typing import BinaryIO, Dict, Iterable, Iterator, List, Optional, Tuple, Union
+
+# isal's igzip is a drop-in replacement for gzip that decompresses several
+# times faster. It is an optional extra (`pip install gdeltnews[fast]`);
+# without it everything behaves identically, just slower.
+try:  # pragma: no cover - depends on an optional dependency
+    from isal import igzip as gzip
+except ImportError:  # pragma: no cover
+    import gzip
 
 import multiprocessing as mp
 from tqdm import tqdm
@@ -92,7 +102,8 @@ def transform_dict(original_dict: Dict[str, List[Dict]]) -> Dict[str, List[Entry
 
 def reconstruct_sentence(
     fragments: List[str],
-    positions: Optional[List[int]] = None
+    positions: Optional[List[int]] = None,
+    keep_unmerged: bool = False,
 ) -> str:
     """Reconstruct a sentence from overlapping fragments, respecting positions.
 
@@ -104,6 +115,19 @@ def reconstruct_sentence(
         * prepends fragments with pos <= current min pos
 
     This avoids moving later fragments before the true beginning of the article.
+
+    Each round picks the fragment with the largest overlap; ties go to the
+    lowest index, and within one fragment an append beats a prepend of equal
+    length. The indexing below is only a faster way of finding that same
+    winner: the reconstructed text is identical to what the original
+    quadratic scan produced (see tests/test_reconstruct_equivalence.py).
+
+    Args:
+        fragments: sentence fragments to merge.
+        positions: optional per-fragment position, same length as `fragments`.
+        keep_unmerged: if True, fragments that never found an overlap are
+            appended at the end (in position order) instead of being dropped.
+            Default False, which is the historical behaviour.
     """
     if not fragments:
         return ""
@@ -118,49 +142,98 @@ def reconstruct_sentence(
     if positions is not None and len(positions) != n:
         positions = None
 
+    # Callers coming through `process_article` sort by pos, and for sorted
+    # positions "appendable" is exactly an index suffix and "prependable"
+    # exactly an index prefix -- two bisects then replace a per-fragment
+    # comparison. The function is public, so unsorted input keeps the old path.
+    sorted_positions = positions is not None and all(
+        positions[i] <= positions[i + 1] for i in range(n - 1)
+    )
+
     # Start from the first fragment (caller sorted by pos)
-    used = {0}
     result_words = words_list[0][:]
+
+    # Indices still unused *and* still eligible, kept ascending so that the
+    # lowest-index tie-break falls out of a plain forward scan.
+    live = list(range(1, n))
 
     if positions is not None:
         min_pos = max_pos = positions[0]
 
-    while len(used) < n:
+    while live:
         best_fragment = -1
         best_overlap = 0
         best_is_prefix = False  # True = prepend, False = append
 
         result_len = len(result_words)
 
-        for idx, words in enumerate(words_list):
-            if idx in used:
-                continue
+        # No remaining fragment can overlap by more than `cap`, so it doubles
+        # as the early-exit bound for the scan below.
+        longest = 0
+        for i in live:
+            length = len(words_list[i])
+            if length > longest:
+                longest = length
+        cap = longest if longest < result_len else result_len
+        if cap == 0:
+            break
 
-            max_k = min(result_len, len(words))
-            if max_k == 0:
+        # An append of length k requires result_words[-k] == words[0]; a
+        # prepend of length k requires result_words[k - 1] == words[-1].
+        # Indexing the tail/head windows by word turns the old descending scan
+        # over every k into a single dict lookup per fragment -- usually a
+        # miss, which rejects the fragment outright. Candidate lists are built
+        # descending, so the first full match found is the longest one.
+        tail_k: Dict[str, List[int]] = {}
+        head_k: Dict[str, List[int]] = {}
+        for k in range(cap, 0, -1):
+            tail_k.setdefault(result_words[result_len - k], []).append(k)
+            head_k.setdefault(result_words[k - 1], []).append(k)
+
+        if sorted_positions:
+            append_from = bisect_left(positions, max_pos)
+            prepend_until = bisect_right(positions, min_pos)
+
+        dead: Optional[List[int]] = None
+
+        for idx in live:
+            words = words_list[idx]
+            length = len(words)
+            max_k = result_len if result_len < length else length
+
+            # Even a perfect overlap on this fragment couldn't beat the
+            # best we've already seen -- skip the work entirely.
+            if max_k <= best_overlap:
                 continue
 
             # Decide if we are allowed to append/prepend this fragment
             can_append = True
             can_prepend = True
             if positions is not None:
-                p = positions[idx]
-                # Append only if this fragment is not earlier than what we already have
-                can_append = p >= max_pos
-                # Prepend only if this fragment is not later than what we already have
-                can_prepend = p <= min_pos
+                if sorted_positions:
+                    can_append = idx >= append_from
+                    can_prepend = idx < prepend_until
+                else:
+                    p = positions[idx]
+                    # Append only if this fragment is not earlier than what we have
+                    can_append = p >= max_pos
+                    # Prepend only if this fragment is not later than what we have
+                    can_prepend = p <= min_pos
                 if not can_append and not can_prepend:
+                    # min_pos only shrinks and max_pos only grows, so a
+                    # fragment rejected once can never become eligible again.
+                    if dead is None:
+                        dead = []
+                    dead.append(idx)
                     continue
 
-            # Even a perfect overlap on this fragment couldn't beat the
-            # best we've already seen — skip the work entirely.
-            if max_k <= best_overlap:
-                continue
-
-            # Try appending: result ... fragment. Iterate down to (best_overlap + 1)
-            # only — anything smaller wouldn't update `best_*` anyway.
+            # Try appending: result ... fragment.
             if can_append:
-                for k in range(max_k, best_overlap, -1):
+                for k in tail_k.get(words[0], ()):
+                    if k > max_k:
+                        continue
+                    if k <= best_overlap:
+                        break
                     if result_words[-k:] == words[:k]:
                         best_fragment = idx
                         best_overlap = k
@@ -170,12 +243,21 @@ def reconstruct_sentence(
             # Try prepending: fragment ... result. If append just locked in a
             # perfect overlap, prepend can't beat it.
             if can_prepend and max_k > best_overlap:
-                for k in range(max_k, best_overlap, -1):
+                for k in head_k.get(words[-1], ()):
+                    if k > max_k:
+                        continue
+                    if k <= best_overlap:
+                        break
                     if result_words[:k] == words[-k:]:
                         best_fragment = idx
                         best_overlap = k
                         best_is_prefix = True
                         break
+
+            if best_overlap >= cap:
+                # Nothing left can beat this, and ties go to the lowest index,
+                # which this ascending scan has already settled.
+                break
 
         if best_fragment == -1:
             # No overlapping fragments that respect positional constraints
@@ -183,27 +265,38 @@ def reconstruct_sentence(
 
         fragment_words = words_list[best_fragment]
 
+        # best_overlap is always >= 1 here: a fragment is only ever selected
+        # from inside a loop that requires an actual match.
         if best_is_prefix:
-            if best_overlap > 0:
-                # fragment[:-overlap] + result
-                result_words = fragment_words[:-best_overlap] + result_words
-            else:
-                # No overlap but still allowed to prepend (rare case)
-                result_words = fragment_words + result_words
+            result_words = fragment_words[:-best_overlap] + result_words
         else:
-            if best_overlap > 0:
-                # result + fragment[overlap:]
-                result_words.extend(fragment_words[best_overlap:])
-            else:
-                # No overlap but allowed to append
-                result_words.extend(fragment_words)
-
-        used.add(best_fragment)
+            result_words.extend(fragment_words[best_overlap:])
 
         if positions is not None:
             p = positions[best_fragment]
-            min_pos = min(min_pos, p)
-            max_pos = max(max_pos, p)
+            if p < min_pos:
+                min_pos = p
+            if p > max_pos:
+                max_pos = p
+
+        if dead is None:
+            live.remove(best_fragment)
+        else:
+            drop = set(dead)
+            drop.add(best_fragment)
+            live = [i for i in live if i not in drop]
+
+    if keep_unmerged and live:
+        # By default the loop above just drops whatever never overlapped,
+        # which silently truncates the article. Opting in appends the
+        # leftovers in position order instead, accepting some duplication.
+        leftover = (
+            sorted(live, key=lambda i: positions[i])
+            if positions is not None
+            else live
+        )
+        for idx in leftover:
+            result_words.extend(words_list[idx])
 
     return " ".join(result_words)
 
@@ -271,15 +364,21 @@ def load_and_filter_data(
     # have passed can be dropped here:
     #   - lang value "xx" is JSON-encoded literally as `"xx"` (codes need no
     #     escaping), so `b'"xx"'` must appear in any line where lang == "xx".
-    #   - a URL substring filter is, by definition, a substring of the URL,
-    #     which is itself a substring of the raw line.
+    #   - an ASCII URL substring filter is, by definition, a substring of the
+    #     URL, which is itself a substring of the raw line. Non-ASCII filters
+    #     are exempt: GDELT may emit the URL with \uXXXX escapes, so the UTF-8
+    #     bytes of the filter need not appear in the raw line even when the
+    #     decoded URL does match. Those runs skip the URL pre-filter and rely
+    #     on the post-parse check below.
     lang_token = (
         b'"' + language_filter.encode("utf-8") + b'"'
         if language_filter is not None
         else None
     )
     url_tokens = (
-        [f.encode("utf-8") for f in url_filters] if url_filters else None
+        [f.encode("utf-8") for f in url_filters]
+        if url_filters and all(f.isascii() for f in url_filters)
+        else None
     )
 
     articles: Dict[str, List[Entry]] = defaultdict(list)
@@ -364,6 +463,7 @@ def determine_source_label(url: str, url_filters: Optional[List[str]] = None) ->
 def process_article(
     url_entries_tuple: Tuple[str, List[Entry]],
     url_filters: Optional[Union[List[str], List[Tuple[str, str]]]] = None,
+    keep_unmerged: bool = False,
 ) -> Dict[str, str]:
     """Process a single article; designed to be run in parallel.
 
@@ -401,7 +501,7 @@ def process_article(
         sentences = [e["sentence"] for e in sorted_entries]
         positions = [e["pos"] for e in sorted_entries]
 
-        text = reconstruct_sentence(sentences, positions)
+        text = reconstruct_sentence(sentences, positions, keep_unmerged=keep_unmerged)
         text = remove_overlap(text)
         text = _clean_text(text)
 
@@ -431,6 +531,7 @@ def process_file_multiprocessing(
     num_processes: Optional[int] = None,
     pool: "Optional[mp.pool.Pool]" = None,
     show_progress: bool = True,
+    keep_unmerged: bool = False,
 ) -> None:
     """Load a GDELT JSON or JSON.GZ file, reconstruct articles, and write a CSV.
 
@@ -446,6 +547,8 @@ def process_file_multiprocessing(
             function is called many times in a row (e.g. one call per file)
             since Pool startup is costly on Windows (spawn).
         show_progress: whether to display a tqdm progress bar.
+        keep_unmerged: if True, fragments that never overlapped are appended
+            to the article instead of being dropped. Default False.
     """
     print(f"Loading and filtering data from {input_file}...")
     articles, _url_order = load_and_filter_data(
@@ -496,7 +599,11 @@ def process_file_multiprocessing(
             writer = csv.writer(out_f, delimiter="|", quoting=csv.QUOTE_NONE)
             writer.writerow(["Text", "Date", "URL", "Source"])
 
-            worker = partial(process_article, url_filters=url_filter_pairs)
+            worker = partial(
+                process_article,
+                url_filters=url_filter_pairs,
+                keep_unmerged=keep_unmerged,
+            )
             result_iter = active_pool.imap_unordered(
                 worker, work_items, chunksize=chunksize
             )
@@ -554,6 +661,7 @@ def reconstruct_webngrams_file(
     language: str | None = "en",
     url_filters: str | list[str] | tuple[str, ...] | set[str] | None = None,
     processes: int | None = None,
+    keep_unmerged: bool = False,
 ) -> None:
     """Friendly wrapper around `process_file_multiprocessing`.
 
@@ -563,6 +671,8 @@ def reconstruct_webngrams_file(
         language: language code to keep (None = keep all).
         url_filters: URL substring or iterable of substrings to keep.
         processes: number of worker processes (None = CPU count).
+        keep_unmerged: if True, fragments that never overlapped are appended
+            to the article instead of being dropped. Default False.
     """
     process_file_multiprocessing(
         input_file=input_file,
@@ -570,4 +680,5 @@ def reconstruct_webngrams_file(
         language_filter=language,
         url_filter=url_filters,
         num_processes=processes,
+        keep_unmerged=keep_unmerged,
     )

@@ -72,6 +72,7 @@ def reconstruct(
     delete_gz: bool = False,
     delete_empty_csv: bool = True,
     show_progress: bool = True,
+    keep_unmerged: bool = False,
 ) -> None:
     """Orchestrate reconstruction over all *.webngrams.json.gz files in a directory.
 
@@ -85,6 +86,9 @@ def reconstruct(
         delete_gz: if True, delete the original *.gz after processing.
         delete_empty_csv: if True, delete CSVs that only contain a header row.
         show_progress: whether to show a tqdm progress bar.
+        keep_unmerged: if True, fragments that never overlapped anything are
+            appended to the article instead of being dropped. Default False,
+            which reproduces the historical output exactly.
     """
     in_dir = Path(input_dir)
     out_dir = Path(output_dir)
@@ -137,6 +141,7 @@ def reconstruct(
                     num_processes=nproc,
                     pool=pool,
                     show_progress=False,
+                    keep_unmerged=keep_unmerged,
                 )
             except Exception as exc:
                 print(f"Error processing {gz_path}: {exc}")
