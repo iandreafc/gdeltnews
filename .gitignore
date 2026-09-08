@@ -14,3 +14,6 @@ dist/
 .pytest_cache/
 .venv/
 venv/
+
+# Local working notes, deliberately not published
+HANDOFF.md

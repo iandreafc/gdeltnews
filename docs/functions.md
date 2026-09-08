@@ -41,6 +41,16 @@ Download GDELT Web NGrams minute files for an inclusive time range.
   - Each file is written to `<name>.gz.part` and renamed on success, so an interrupted run can never leave a truncated `.gz` that a later run mistakes for complete.
 
 
+### `fetch_minute(ts, dest_dir, *, overwrite=False, timeout=30, quiet=False, session=None, retries=3) -> (path | None, outcome)`
+
+Lower-level variant of `download_gdelt_file` that also returns *why* a minute
+produced no file. `outcome` is `"ok"`, `"cached"`, `"missing"` (GDELT publishes
+nothing for that minute) or `"failed"` (still erroring after every retry).
+
+Use `download()` unless you are driving your own loop and need per-minute
+outcomes — the GUI uses this to advance its progress bar while still reporting
+how many slots genuinely failed.
+
 ### `reconstruct(input_dir="gdeltdata", output_dir="gdeltpreprocessed", *, language=None, url_filters=None, processes=None, delete_gz=False, delete_empty_csv=True, show_progress=True, keep_unmerged=False) -> None`
 
 Bulk reconstruction runner for a folder of GDELT `*.webngrams.json.gz` files.

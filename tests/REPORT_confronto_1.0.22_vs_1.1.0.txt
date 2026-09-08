@@ -1,0 +1,80 @@
+CONFRONTO RICOSTRUZIONI: gdeltnews 1.0.22 (PyPI) vs 1.1.0 (locale)
+
+Dati   : 33 file .webngrams.json.gz reali, 2025-11-25 dalle 10:00 alle 13:59
+1.0.22 : installato da PyPI, gzip della libreria standard
+1.1.0 : wheel locale, con isal installato (backend gzip diverso)
+        (il build testato era etichettato 1.0.24: stesso codice identico,
+         cambia solo la stringa di versione in pyproject.toml)
+Confronto per URL, ignorando l'ordine delle righe (gia' non
+deterministico in entrambe le versioni per via di imap_unordered).
+
+==============================================================================
+MODO: NARROW   (language=it + url_filters=[repubblica.it, corriere.it])
+==============================================================================
+File CSV prodotti: 33 (identici come insieme)
+
+Articoli confrontati        : 101
+Caratteri di testo          : 316853
+Identici (testo+data+source): 101
+DIVERSI                     : 0
+URL solo in 1.0.22          : 0
+URL solo in 1.1.0          : 0
+Header CSV diversi          : 0
+
+==============================================================================
+MODO: BROAD   (language=it, nessun filtro URL)
+==============================================================================
+File CSV prodotti: 33 (identici come insieme)
+
+Articoli confrontati        : 7491
+Caratteri di testo          : 18144270
+Identici (testo+data+source): 7491
+DIVERSI                     : 0
+URL solo in 1.0.22          : 0
+URL solo in 1.1.0          : 0
+Header CSV diversi          : 0
+
+==============================================================================
+TOTALE
+==============================================================================
+Articoli confrontati : 7592
+Identici             : 7592
+Diversi              : 0
+URL mancanti/aggiunti: 0 / 0
+
+ESITO: NESSUNA DIFFERENZA
+
+==============================================================================
+TEMPI (33 file, 10 processi, stessa macchina)
+==============================================================================
+                                   1.0.22      1.1.0
+filtro stretto (it + 2 domini)     32.97 s     27.28 s   (-17%)
+filtro largo   (solo it)          111.42 s     65.35 s   (-41%)
+
+==============================================================================
+EFFETTO DI keep_unmerged=True (opzione nuova, DISATTIVATA di default)
+==============================================================================
+Questa e' l'unica cosa in 1.1.0 che puo' cambiare il testo ricostruito, e
+solo se la si attiva esplicitamente. Con il default (False) l'output e'
+quello confrontato sopra, cioe' identico a 1.0.22.
+
+Articoli analizzati                 : 101
+Invariati con keep_unmerged=True    : 91 (90.1%)
+Allungati con keep_unmerged=True    : 10 (9.9%)
+Fattore di crescita: mediana 1.09x, max 3.50x
+Il testo di default e' sempre un prefisso esatto di quello esteso: True
+
+Il testo prodotto di default e' sempre un prefisso esatto di quello esteso:
+attivare l'opzione non riordina e non riscrive nulla, aggiunge soltanto in
+coda i frammenti che non si sovrapponevano a niente.
+
+==============================================================================
+COSA NON COPRE QUESTO TEST
+==============================================================================
+Il confronto riguarda articoli in italiano del 2025-11-25 fra le 10:00 e le
+13:59. Non e' una prova su tutte le lingue o su tutti i periodi. La copertura
+generale dell'algoritmo e' data dal fuzz test in
+tests/test_reconstruct_equivalence.py, che confronta la nuova funzione di
+merge con una copia verbatim di quella di 1.0.22 su 4500 casi generati
+casualmente (vocabolari piccoli e grandi, frammenti di lunghezza variabile,
+liste mescolate, posizioni ordinate/non ordinate/assenti) piu' 8 casi limite.

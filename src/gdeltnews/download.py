@@ -134,7 +134,7 @@ def make_session(workers: int = DEFAULT_WORKERS) -> requests.Session:
     return session
 
 
-def _fetch_minute(
+def fetch_minute(
     ts: dt.datetime,
     dest_dir: str,
     *,
@@ -148,6 +148,11 @@ def _fetch_minute(
 
     ``outcome`` is one of "ok", "cached", "missing" (404 - that minute simply
     isn't published) or "failed" (still erroring after `retries` attempts).
+
+    :func:`download` is the normal entry point. This lower-level variant exists
+    for callers that drive their own loop and need the per-minute outcome --
+    the GUI uses it to advance its progress bar and still tell the user how
+    many slots genuinely failed.
     """
     os.makedirs(dest_dir, exist_ok=True)
 
@@ -236,7 +241,7 @@ def download_gdelt_file(
             4xx responses are never retried: a 404 just means GDELT has no
             file for that minute.
     """
-    gz_path, _outcome = _fetch_minute(
+    gz_path, _outcome = fetch_minute(
         ts,
         dest_dir,
         overwrite=overwrite,
@@ -326,7 +331,7 @@ def _download_range(
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = [
                 executor.submit(
-                    _fetch_minute,
+                    fetch_minute,
                     ts,
                     outdir,
                     overwrite=overwrite,
@@ -422,4 +427,10 @@ def download(
 
 
 # Alias kept for convenience for existing imports (non-CLI).
-__all__ = ["DownloadStats", "download", "make_session", "parse_timestamp"]
+__all__ = [
+    "DownloadStats",
+    "download",
+    "fetch_minute",
+    "make_session",
+    "parse_timestamp",
+]

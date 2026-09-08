@@ -77,6 +77,11 @@ Reconstruct, and Filter/Merge.
   the ISO format `YYYY‑MM‑DDTHH:MM:SS`, choose an output directory
   where the compressed `.gz` files will be saved and decide whether
   the program should decompress the files as they are downloaded.
+  **Concurrent downloads** controls how many minute files are fetched
+  at once (8 by default; set it to 1 to download one at a time).
+  Failed requests are retried automatically, and when the run finishes
+  the pop‑up separates minutes GDELT simply never published — which is
+  normal — from those that kept failing and are genuinely missing.
 
 * **Reconstruct** – select the directory containing the downloaded
   `.webngrams.json.gz` files, choose an output directory for the
@@ -85,6 +90,9 @@ Reconstruct, and Filter/Merge.
   number of worker processes to use (leave blank to use all cores).
   Reconstruction reads the compressed files directly; decompression
   during download is optional and is no longer required for this step.
+  **Keep unmerged fragments** controls what happens to fragments that
+  do not overlap anything: they are discarded by default, which can
+  truncate an article. Tick it to append them at the end instead.
 
 * **Filter/Merge** – select the directory containing the per‑file
   CSVs, choose a destination path for the final CSV and write a

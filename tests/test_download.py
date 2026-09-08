@@ -79,7 +79,8 @@ def _run_case(server_url, script, minutes=1, **kwargs):
     start = "2025-11-25T10:00:00"
     end = "2025-11-25T10:%02d:00" % (minutes - 1)
     for i in range(minutes):
-        SCRIPT["202511251000%02d.webngrams.json.gz" % i] = list(script)
+        # GDELT names files YYYYMMDDHHMMSS, so the minute offset lands in MM.
+        SCRIPT["2025112510%02d00.webngrams.json.gz" % i] = list(script)
 
     with tempfile.TemporaryDirectory() as d:
         stats = dl.download(

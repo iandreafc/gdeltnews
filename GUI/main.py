@@ -15,6 +15,7 @@ To run the GUI install the `gdeltnews` package (e.g. with
 
 import threading
 import tkinter as tk
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from tkinter import filedialog, messagebox, ttk
 
 # These imports raise ImportError if gdeltnews is not installed.  The
@@ -36,6 +37,9 @@ try:
         iter_minutes as dl_iter_minutes,
         download_gdelt_file as dl_download_gdelt_file,
         decompress_gzip as dl_decompress_gzip,
+        fetch_minute as dl_fetch_minute,
+        make_session as dl_make_session,
+        DEFAULT_WORKERS as DL_DEFAULT_WORKERS,
     )  # type: ignore
     from gdeltnews.reconstruct import (
         find_gz_files as rc_find_gz_files,
@@ -213,6 +217,15 @@ class GdeltNewsGUI:
         ).grid(row=row, column=2, padx=10, pady=5)
         row += 1
 
+        ttk.Label(tab, text="Concurrent downloads").grid(
+            row=row, column=0, sticky=tk.W, padx=10, pady=5
+        )
+        self.workers_var = tk.StringVar(value=str(DL_DEFAULT_WORKERS))
+        ttk.Entry(tab, textvariable=self.workers_var, width=10).grid(
+            row=row, column=1, padx=10, pady=5, sticky=tk.W
+        )
+        row += 1
+
         self.decompress_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(tab, text="Decompress", variable=self.decompress_var).grid(
             row=row, column=0, sticky=tk.W, padx=10, pady=5
@@ -308,6 +321,16 @@ class GdeltNewsGUI:
             text="Delete empty CSVs",
             variable=self.del_empty_csv_var,
         ).grid(row=row, column=0, sticky=tk.W, padx=10, pady=5)
+
+        # Fragments that overlap nothing are dropped by default, which
+        # silently truncates the article. Off by default so the output
+        # matches what earlier versions produced.
+        self.keep_unmerged_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            tab,
+            text="Keep unmerged fragments",
+            variable=self.keep_unmerged_var,
+        ).grid(row=row, column=1, sticky=tk.W, padx=10, pady=5)
         row += 1
 
         # Run button
@@ -457,9 +480,15 @@ class GdeltNewsGUI:
         def wrapper() -> None:
             try:
                 _require_module()
-                func(*args, **kwargs)
+                # A task may return a string to replace the generic message,
+                # e.g. to report how many minute slots actually failed.
+                result = func(*args, **kwargs)
+                summary = (
+                    result if isinstance(result, str) and result
+                    else "Operation completed successfully."
+                )
                 self.master.after(
-                    0, lambda: messagebox.showinfo("Done", "Operation completed successfully.")
+                    0, lambda msg=summary: messagebox.showinfo("Done", msg)
                 )
             except Exception as exc:
                 self.master.after(
@@ -488,10 +517,27 @@ class GdeltNewsGUI:
             )
             return
 
+        workers_str = self.workers_var.get().strip()
+        workers = DL_DEFAULT_WORKERS
+        if workers_str:
+            try:
+                workers = int(workers_str)
+            except ValueError:
+                messagebox.showerror(
+                    "Invalid value",
+                    "Concurrent downloads must be an integer or left blank.",
+                )
+                return
+            if workers < 1:
+                messagebox.showerror(
+                    "Invalid value", "Concurrent downloads must be at least 1."
+                )
+                return
+
         # Reset progress bar before starting
         self.download_progress.config(value=0)
 
-        def task() -> None:
+        def task() -> str:
             # Use internal helpers to show progress.  Parsing errors will
             # propagate as exceptions and be handled by `_run_in_thread`.
             start_dt = dl_parse_timestamp(start)
@@ -501,28 +547,65 @@ class GdeltNewsGUI:
             if total == 0:
                 raise ValueError("The selected time range covers zero minutes.")
 
-            for idx, ts in enumerate(minutes):
-                # download the .gz file (quiet=True to avoid printing to stdout)
-                gz_path = dl_download_gdelt_file(
-                    ts,
-                    outdir,
-                    overwrite=overwrite,
-                    timeout=30,
-                    quiet=True,
+            nworkers = max(1, min(workers, total))
+            downloaded = missing = failed = done = 0
+
+            # GDELT publishes one small file per minute, so wall time is
+            # dominated by per-request latency rather than bandwidth: fetching
+            # concurrently over one pooled Session beats a blocking GET per
+            # file by a wide margin on multi-hour ranges.
+            with dl_make_session(nworkers) as session:
+                with ThreadPoolExecutor(max_workers=nworkers) as executor:
+                    futures = [
+                        executor.submit(
+                            dl_fetch_minute,
+                            ts,
+                            outdir,
+                            overwrite=overwrite,
+                            timeout=30,
+                            quiet=True,
+                            session=session,
+                        )
+                        for ts in minutes
+                    ]
+
+                    for future in as_completed(futures):
+                        gz_path, outcome = future.result()
+                        if outcome == "missing":
+                            missing += 1
+                        elif outcome == "failed":
+                            failed += 1
+                        else:
+                            downloaded += 1
+                            if gz_path is not None and decompress:
+                                try:
+                                    dl_decompress_gzip(gz_path)
+                                except Exception:
+                                    # Decompression errors are not fatal
+                                    pass
+
+                        # update progress bar
+                        done += 1
+                        progress = int(done / total * 100)
+                        self.master.after(
+                            0,
+                            lambda val=progress: self.download_progress.config(value=val),
+                        )
+
+            lines = ["Downloaded %d of %d minute slots." % (downloaded, total)]
+            if missing:
+                lines.append(
+                    "%d slots have no file on the GDELT server (this is normal)."
+                    % missing
                 )
-                # decompress if requested and the file exists
-                if gz_path is not None and decompress:
-                    try:
-                        dl_decompress_gzip(gz_path)
-                    except Exception:
-                        # Decompression errors are not fatal; skip silently
-                        pass
-                # update progress bar
-                progress = int((idx + 1) / total * 100)
-                self.master.after(
-                    0,
-                    lambda val=progress: self.download_progress.config(value=val),
+            if failed:
+                # Worth shouting about: these are real holes in the data, not
+                # minutes GDELT never published.
+                lines.append(
+                    "WARNING: %d slots kept failing and are missing from the "
+                    "output directory." % failed
                 )
+            return "\n".join(lines)
 
         # Run our custom download task with progress reporting
         self._run_in_thread(task)
@@ -557,6 +640,7 @@ class GdeltNewsGUI:
 
         delete_gz = self.del_gz_var.get()
         delete_empty = self.del_empty_csv_var.get()
+        keep_unmerged = self.keep_unmerged_var.get()
 
         # Reset progress bar before starting
         self.recon_progress.config(value=0)
@@ -603,6 +687,7 @@ class GdeltNewsGUI:
                             num_processes=nproc,
                             pool=pool,
                             show_progress=False,
+                            keep_unmerged=keep_unmerged,
                         )
                     except Exception:
                         # Continue even if one file fails
